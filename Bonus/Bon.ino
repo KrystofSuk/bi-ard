@@ -1,17 +1,24 @@
+
+#include <SD.h>
 #include <Esplora.h>
 #include <TFT.h>
 #include <SPI.h>
+#include <EEPROM.h>
 
 #define DOTL 200             
 #define DASHL 800            
 #define NO_LIGHTL 200        
+#define NO_LIGHTL_LETTER 400 
+#define NO_LIGHTL_WORD 1000        
 #define DOWN SWITCH_3       
 #define BACK SWITCH_3       
 #define SELECT SWITCH_2     
 #define NEXT SWITCH_2        
 #define UP SWITCH_1          
 #define SET SWITCH_1            
-#define TEST SWITCH_4       
+#define TEST SWITCH_4           
+#define DELETE SWITCH_2           
+#define BLINK SWITCH_4       
 
 enum mode {
   MENU_A,
@@ -38,6 +45,14 @@ int b = 255;
 int tmp = 0;
 int last = 0;
 
+int current_char = 0;
+int last_current_char = 0;
+int word_list [27] = {3,13,4,18, 26 ,20,12,24,9,8, 26 ,18,15,14,17,0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+int word_list2 [27] = {3,13,4,18, 26 ,20,12,24,9,8, 26 ,18,15,14,17,0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+int current_index = 0; 
+char* letters_list = "DNES UMYJI SPORA            ";
+char letter[2] = " \0";
+
 int slider = 0;
 int up_pressed = 0;
 int down_pressed = 0;
@@ -46,15 +61,220 @@ int set_pressed = 0;
 int next_pressed = 0;
 int test_pressed = 0;
 int back_pressed = 0;
+int delete_pressed = 0;
+int blink_pressed = 0;
 
 char colorPrintout[4];
-
 unsigned long time_now = 0;
+
+int run_index = 0;
+int letter_index = 0;
+
+char* letters[]={
+".-", "-...", "-.-.", "-..", ".", "..-.", "--.",
+"...." , "..", ".---", "-.-", ".-..", "--", "-.",
+"---", ".--.", "--.-", ".-.", "...", "-", "..-",
+"...-", ".--", "-..-", "-.--", "--..", "_"
+};
+
+#ifndef Helpers
 
 void setTextProperties(int _r, int _g, int _b, int _size){
   EsploraTFT.stroke(_b,_g,_r);
   EsploraTFT.setTextSize(_size);
 }
+
+void writeData(int val, int index){
+    EEPROM.write(index, highByte(val));
+    EEPROM.write(index+1, lowByte(val));
+}
+
+int readData(int index){
+    return word(EEPROM.read(index), EEPROM.read(index+1));
+}
+
+void processInputs(void){
+    if(current_mode == MENU_A || current_mode == MENU_B){
+
+        if(Esplora.readButton(UP) == LOW){
+            up_pressed = 1;
+        }else{
+            if(up_pressed){
+                up_pressed = 0;
+                if(current_mode == MENU_A)
+                    current_mode = MENU_B;
+                else if(current_mode == MENU_B)
+                    current_mode = MENU_A;
+                displayMenuSelector();
+        
+            }
+         }
+
+        if(Esplora.readButton(DOWN) == LOW){
+            down_pressed = 1;
+        }else{
+            if(down_pressed){
+                down_pressed = 0;
+                if(current_mode == MENU_A)
+                    current_mode = MENU_B;
+                else if(current_mode == MENU_B)
+                    current_mode = MENU_A;
+                displayMenuSelector();
+            }
+        }        
+
+        if(Esplora.readButton(SELECT) == LOW){
+            select_pressed = 1;
+        }else{
+            if(select_pressed){
+                select_pressed = 0;
+                if(current_mode == MENU_A){
+                    current_mode = RGB_R;
+                    displayRGBMenu();
+                    displayRGBActive(current_mode);
+                }
+                else if(current_mode == MENU_B){
+                    current_mode = MORSE_EDIT;
+                    displayMorseMenu();
+                }
+            }
+        }
+
+    }else if(current_mode == RGB_R || current_mode == RGB_G || current_mode == RGB_B){
+
+        if(Esplora.readButton(NEXT) == LOW){
+            next_pressed = 1;
+        }else{
+            if(next_pressed){
+                next_pressed = 0;
+                displayRGBClear(current_mode,0);
+                switch(current_mode){
+                    case RGB_R:
+                        current_mode = RGB_G;
+                        break;
+                    case RGB_G:
+                        current_mode = RGB_B;
+                        break;
+                    case RGB_B:
+                        current_mode = RGB_R;
+                        break;
+                }
+                displayRGBActive(current_mode);
+            }
+        }
+
+        if(Esplora.readButton(TEST) == LOW){
+            if(!test_pressed){
+                test_pressed = 1;
+                flash(current_mode, DOT);
+            }
+        }else{
+            if(test_pressed){
+                test_pressed = 0;
+            }
+        }
+
+        if(Esplora.readButton(SET) == LOW){
+            set_pressed = 1;
+        }else{
+            if(set_pressed){
+                set_pressed = 0;
+                switch(current_mode){
+                    case RGB_R:
+                        r = tmp;
+                        writeData(r, 0);
+                        break;
+                    case RGB_G:
+                        g = tmp;
+                        writeData(g, 2);
+                        break;
+                    case RGB_B:
+                        b = tmp;
+                        writeData(b, 4);
+                        break;
+                }
+            }
+        }
+        
+        if(Esplora.readButton(BACK) == LOW){
+            back_pressed = 1;
+        }else{
+            if(back_pressed){
+                back_pressed = 0;                
+                current_mode = MENU_A;
+                displayMenu();
+            }
+        }
+
+        tmp = Esplora.readSlider();
+        tmp = (int)((1.0-((float)tmp / 1023.0)) * 255.0);
+        if(tmp != last){
+            last = tmp;            
+            displayRGBActive(current_mode);
+        }
+
+    }else if(current_mode == MORSE_EDIT || current_mode == MORSE_RUN){
+        
+        current_char = Esplora.readSlider();
+        current_char = (int)((1.0-((float)current_char / 1023.0)) * 26);
+
+        if(current_char != last_current_char){
+            last_current_char = current_char;            
+            displayMorseLetter();
+        }
+
+        if(Esplora.readButton(BACK) == LOW){
+            back_pressed = 1;
+        }else{
+            if(back_pressed && current_mode == MORSE_EDIT){
+                back_pressed = 0;                
+                current_mode = MENU_B;
+                displayMenu();
+            }
+        }
+        
+        if(Esplora.readButton(SET) == LOW){
+            set_pressed = 1;
+        }else{
+            if(set_pressed && current_mode == MORSE_EDIT){
+                set_pressed = 0;   
+                letters_list[current_index] = getLetter(current_char);
+                word_list[current_index] = current_char;
+                if(current_index < 27)                    
+                    current_index++;
+                displayMorseText();
+            }
+        }
+
+        if(Esplora.readButton(DELETE) == LOW){
+            delete_pressed = 1;
+        }else{
+            if(delete_pressed && current_mode == MORSE_EDIT){
+                if(current_index > 0)                    
+                    current_index--;
+                delete_pressed = 0;   
+                word_list[current_index] = -1;
+                letters_list[current_index] = ' ';
+                displayMorseText();
+            }
+        }
+        
+        if(Esplora.readButton(BLINK) == LOW){
+            blink_pressed = 1;
+        }else{
+            if(blink_pressed){
+                blink_pressed = 0; 
+                if(current_mode == MORSE_EDIT){
+                    startMorse();
+                    current_mode == MORSE_RUN;
+                } 
+            }
+        }
+
+    }
+}
+
+#endif
 
 #ifndef MainMenu
 
@@ -63,6 +283,7 @@ void displayMenu(void){
     setTextProperties(255,255,255,1);
     EsploraTFT.text("  1. Set RGB",30,50);
     EsploraTFT.text("  2. Blink Morse",30,60);
+    EsploraTFT.text("  Made by Suk",30,10);
     displayMenuSelector();
 }
 
@@ -173,122 +394,61 @@ void displayRGBActive(mode m){
 
 #endif 
 
-void processInputs(void){
-    if(current_mode == MENU_A || current_mode == MENU_B){
+#ifndef MorseMenu
 
-        if(Esplora.readButton(UP) == LOW){
-            up_pressed = 1;
-        }else{
-            if(up_pressed){
-                up_pressed = 0;
-                if(current_mode == MENU_A)
-                    current_mode = MENU_B;
-                else if(current_mode == MENU_B)
-                    current_mode = MENU_A;
-                displayMenuSelector();
-        
-            }
-         }
-
-        if(Esplora.readButton(DOWN) == LOW){
-            down_pressed = 1;
-        }else{
-            if(down_pressed){
-                down_pressed = 0;
-                if(current_mode == MENU_A)
-                    current_mode = MENU_B;
-                else if(current_mode == MENU_B)
-                    current_mode = MENU_A;
-                displayMenuSelector();
-            }
-        }        
-
-        if(Esplora.readButton(SELECT) == LOW){
-            select_pressed = 1;
-        }else{
-            if(select_pressed){
-                select_pressed = 0;
-                if(current_mode == MENU_A){
-                    current_mode = RGB_R;
-                    displayRGBMenu();
-                    displayRGBActive(current_mode);
-                }
-                else if(current_mode == MENU_B){
-                    current_mode = MORSE_EDIT;
-                }
-            }
-        }
-
-    }else if(current_mode == RGB_R || current_mode == RGB_G || current_mode == RGB_B){
-
-        if(Esplora.readButton(NEXT) == LOW){
-            next_pressed = 1;
-        }else{
-            if(next_pressed){
-                next_pressed = 0;
-                displayRGBClear(current_mode,0);
-                switch(current_mode){
-                    case RGB_R:
-                        current_mode = RGB_G;
-                        break;
-                    case RGB_G:
-                        current_mode = RGB_B;
-                        break;
-                    case RGB_B:
-                        current_mode = RGB_R;
-                        break;
-                }
-                displayRGBActive(current_mode);
-            }
-        }
-
-        if(Esplora.readButton(TEST) == LOW){
-            if(!test_pressed){
-                test_pressed = 1;
-                flash(current_mode, DOT);
-            }
-        }else{
-            if(test_pressed){
-                test_pressed = 0;
-            }
-        }
-
-        if(Esplora.readButton(SET) == LOW){
-            set_pressed = 1;
-        }else{
-            if(set_pressed){
-                set_pressed = 0;
-                switch(current_mode){
-                    case RGB_R:
-                        r = tmp;
-                        break;
-                    case RGB_G:
-                        g = tmp;
-                        break;
-                    case RGB_B:
-                        b = tmp;
-                        break;
-                }
-            }
-        }
-        
-        if(Esplora.readButton(BACK) == LOW){
-            back_pressed = 1;
-        }else{
-            if(back_pressed){
-                back_pressed = 0;                
-                current_mode = MENU_A;
-                displayMenu();
-            }
-        }
-
-        tmp = Esplora.readSlider();
-        tmp = (int)((1.0-((float)tmp / 1023.0)) * 255.0);
-        if(tmp != last){
-            last = tmp;            
-            displayRGBActive(current_mode);
-        }
+char getChar(int index){
+    if(index == 26){
+        index = 95;
+    }else{
+        index = 65 + index;
     }
+    return (char)index;
+}
+
+char getLetter(int index){
+    if(index == 26){
+        index = 32;
+    }else{
+        index = 65 + index;
+    }
+    return (char)index;
+}
+
+void displayMorseMenu(void){
+    EsploraTFT.background(0,0,0);
+    current_index = 16;
+    letters_list = (char *)"DNES UMYJI SPORA            ";
+    for(int i = 0; i < 27; i++)
+        word_list[i] = word_list2[i];
+    current_char = Esplora.readSlider();
+    current_char = (int)((1.0-((float)current_char / 1023.0)) * 26);
+    displayMorseLetter();    
+    displayMorseText();
+}
+
+void displayMorseLetter(void){    
+    setTextProperties(0,0,0,1);
+    EsploraTFT.fill(0,0,0);
+    EsploraTFT.rect(80,30,10,15);
+    setTextProperties(255,0,0,2);
+    letter[0] = getChar(current_char);
+    EsploraTFT.text(letter,80,30);
+}
+
+void displayMorseText(void){    
+    setTextProperties(0,0,0,1);
+    EsploraTFT.fill(0,0,0);
+    EsploraTFT.rect(0+current_index*6,60,6,10);
+    setTextProperties(255,255,255,1);
+    EsploraTFT.text(letters_list,0,60);
+}
+
+#endif
+
+void startMorse(){
+    run_index = 0;
+    letter_index = 0;
+    current_mode = MORSE_RUN;
 }
 
 void flash(mode m, flash_mode f){    
@@ -300,10 +460,101 @@ void flash(mode m, flash_mode f){
         Esplora.writeRGB(r, tmp, b);
     }else if(m == RGB_R){
         Esplora.writeRGB(tmp, g, b);
+    }else{
+        Esplora.writeRGB(r, g, b);
     }
 }
 
+int getLetterLenght(int index){
+    if(index == 4 || index == 19 || index == 26)
+        return 1;
+    else if(index == 0 || index == 8 || index == 12 || index == 13)
+        return 2;
+    else if(index == 3 || index == 6 || index == 10|| index == 14|| index == 17|| index == 18|| index == 20|| index == 22)
+        return 3;
+    else
+        return 4;
+}
+
+int dif = 0;
+int add = 0;
+
+void processMorse(){  
+
+    if(current_mode == MORSE_RUN){
+        
+        if(current_flash_mode == NO_LIGHT){
+            Esplora.writeRGB(0, 0, 0);
+            if(millis() > time_now + dif + add + NO_LIGHTL){
+                if(letters[word_list[run_index]][letter_index] == '.'){
+                    add = 0;
+                    Serial.println(".");
+                    flash(MORSE_RUN, DOT);
+                }
+                if(letters[word_list[run_index]][letter_index] == '-'){
+                    add = 0;
+                    Serial.println("-");                    
+                    flash(MORSE_RUN, DASH);
+                }
+                if(letters[word_list[run_index]][letter_index] == '_'){
+                    Serial.println("________");                    
+                    add = NO_LIGHTL_WORD;
+                }
+                letter_index++;
+                if(getLetterLenght(word_list[run_index]) <= letter_index){
+                    if(add == 0)
+                        add = NO_LIGHTL_LETTER;
+                    run_index++;
+                    if(run_index == 27 || word_list[run_index] == -1)
+                        current_mode = MORSE_EDIT;
+                    else
+                        letter_index = 0;
+                }
+            }
+        }else if(current_flash_mode == DOT){
+            if(millis() > time_now + DOTL){
+                current_flash_mode = NO_LIGHT;
+                dif = DOTL;
+            }
+        }else if(current_flash_mode == DASH){
+            if(millis() > time_now + DASHL){
+                current_flash_mode = NO_LIGHT;  
+                dif = DASHL;      
+            }
+        }
+
+    }else{
+
+        if(current_flash_mode == NO_LIGHT){
+            Esplora.writeRGB(0, 0, 0);
+        }else if(current_flash_mode == DOT){
+            if(millis() > time_now + DOTL){
+                current_flash_mode = NO_LIGHT;
+            }
+        }else if(current_flash_mode == DASH){
+            if(millis() > time_now + DASHL)
+                current_flash_mode = NO_LIGHT;        
+        }
+    }
+
+}
+
 void setup(){
+    Serial.begin(9600);
+
+    r = readData(0);
+    g = readData(2);
+    b = readData(4);
+    if(r == -1){
+        r = 0;
+    }
+    if(g == -1){
+        g = 0;
+    }
+    if(b == -1){
+        b = 0;
+    }
+
     EsploraTFT.begin();
     EsploraTFT.background(0,0,0);
     displayMenu();
@@ -311,16 +562,5 @@ void setup(){
 
 void loop(){
     processInputs();  
-
-    
-    if(current_flash_mode == NO_LIGHT){
-        Esplora.writeRGB(0, 0, 0);
-    }else if(current_flash_mode == DOT){
-        if(millis() > time_now + DOTL){
-            current_flash_mode = NO_LIGHT;
-        }
-    }else if(current_flash_mode == DASH){
-        if(millis() > time_now + DASHL)
-            current_flash_mode = NO_LIGHT;        
-    }
+    processMorse();
 }
