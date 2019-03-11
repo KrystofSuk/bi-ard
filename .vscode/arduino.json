@@ -1,5 +1,5 @@
 {
     "board": "arduino:avr:esplora",
-    "sketch": "CV3\\CV3.ino",
-    "port": "COM4"
+    "sketch": "CV4/CV4.ino",
+    "port": "COM8"
 }
