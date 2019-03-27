@@ -1,5 +1,6 @@
 {
     "board": "arduino:avr:esplora",
-    "sketch": "CV4/CV4.ino",
-    "port": "COM8"
+    "sketch": "CV5.ino",
+    "port": "COM4",
+    "programmer": "AVR ISP"
 }
